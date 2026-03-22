@@ -1,0 +1,9 @@
+# Blueprint for Render — connect this Git repo in the Render dashboard or via MCP create_web_service.
+services:
+  - type: web
+    name: indian-stock-research-analyst
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
