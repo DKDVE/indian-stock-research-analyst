@@ -1,0 +1,13 @@
+{# Market Pulse tab panel — included from index.html #}
+<div id="tab-market" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-market">
+  <div class="feed-pills" role="group" aria-label="Market feed">
+    <button type="button" class="feed-pill active" data-feed="trending">Trending</button>
+    <button type="button" class="feed-pill" data-feed="most_active">Most Active</button>
+    <button type="button" class="feed-pill" data-feed="shockers">Price Shockers</button>
+    <button type="button" class="feed-pill" data-feed="ipo">IPO</button>
+    <button type="button" class="feed-pill" data-feed="52w">52W High/Low</button>
+  </div>
+  <p id="market-status" class="market-status" aria-live="polite"></p>
+  <div id="market-table-wrap" class="market-table-wrap"></div>
+  <p id="market-updated" class="market-updated muted"></p>
+</div>

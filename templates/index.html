@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Stock Research tab -->
+<div id="tab-stock" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-stock">
+  <section class="section search-section">
+    <div class="search-row">
+      <input type="text" id="ticker-input" class="oat-input search-input"
+             placeholder="Enter NSE ticker — e.g. RELIANCE, HDFCBANK, TCS"
+             autocomplete="off" spellcheck="false" aria-label="Ticker symbol" />
+      <select id="prompt-select" class="oat-input prompt-select" aria-label="Brief style">
+        <option value="A_structured">Structured Brief</option>
+        <option value="B_conversational">Conversational</option>
+        <option value="C_risk_first">Risk-First</option>
+      </select>
+      <button type="button" id="analyse-btn" class="oat-btn oat-btn--primary">Analyse →</button>
+    </div>
+    <div class="quick-picks">
+      <span class="quick-picks__label">Quick picks</span>
+      <button type="button" class="quick-pick" data-ticker="RELIANCE">RELIANCE</button>
+      <span class="quick-picks__sep">·</span>
+      <button type="button" class="quick-pick" data-ticker="HDFCBANK">HDFCBANK</button>
+      <span class="quick-picks__sep">·</span>
+      <button type="button" class="quick-pick" data-ticker="INFY">INFY</button>
+      <span class="quick-picks__sep">·</span>
+      <button type="button" class="quick-pick" data-ticker="ZOMATO">ZOMATO</button>
+      <span class="quick-picks__sep">·</span>
+      <button type="button" class="quick-pick" data-ticker="TATAMOTORS">TATAMOTORS</button>
+      <span class="quick-picks__sep">·</span>
+      <button type="button" class="quick-pick" data-ticker="IRCTC">IRCTC</button>
+      <span class="quick-picks__sep">·</span>
+      <button type="button" class="quick-pick" data-ticker="DMART">DMART</button>
+      <span class="quick-picks__sep">·</span>
+      <button type="button" class="quick-pick" data-ticker="ADANIPORTS">ADANIPORTS</button>
+    </div>
+    <p id="status-bar" class="status-bar" role="status"></p>
+  </section>
+
+  <div id="output" class="output" hidden>
+    <div id="stock-header" class="stock-header">
+      <div class="stock-header__left">
+        <h2 id="company-name" class="stock-header__name">—</h2>
+        <p id="company-sub" class="stock-header__sub muted">—</p>
+      </div>
+      <div class="stock-header__right price-box">
+        <div id="price-nse" class="price-box__price">—</div>
+        <div id="price-change" class="price-box__change">—</div>
+        <div class="price-box__meta muted">NSE · <span id="data-date">—</span></div>
+      </div>
+    </div>
+
+    <!-- Loading shimmer only while fetching; hidden must not be overridden by .metrics-grid -->
+    <div id="kpi-skeleton" class="kpi-skeleton" hidden>
+      <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+      <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+      <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+      <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+    </div>
+
+    <div id="metrics-grid" class="metrics-grid">
+      <!-- Order: P/E, P/B, EPS, MCap, ROE, Div, 52H, 52L, Trend, Risk, Target, 50d, 300d, Rev, NP -->
+      <div class="metric-card"><div class="metric-card__label">P/E Ratio</div><div class="metric-card__value" id="m-pe">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">P/B Ratio</div><div class="metric-card__value" id="m-pb">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">EPS</div><div class="metric-card__value" id="m-eps">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">Market Cap</div><div class="metric-card__value" id="m-cap">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">ROE %</div><div class="metric-card__value" id="m-roe">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">Div Yield</div><div class="metric-card__value" id="m-div">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">52W High</div><div class="metric-card__value" id="m-high">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">52W Low</div><div class="metric-card__value" id="m-low">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">Trend</div><div class="metric-card__value" id="m-trend">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">Risk Level</div><div class="metric-card__value" id="m-risk">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">Target Price</div><div class="metric-card__value" id="m-target">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">50d MA</div><div class="metric-card__value" id="m-sma50">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">300d MA</div><div class="metric-card__value" id="m-sma200">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">Revenue</div><div class="metric-card__value" id="m-rev">—</div></div>
+      <div class="metric-card"><div class="metric-card__label">Net Profit</div><div class="metric-card__value" id="m-profit">—</div></div>
+    </div>
+
+    <details id="peers-section" class="peers-section" hidden>
+      <summary class="section-heading peers-summary">
+        Peer comparison
+        <span id="peers-count" class="muted peers-count"></span>
+      </summary>
+      <div class="peers-table-wrap">
+        <table class="peers-table" id="peers-table">
+          <thead>
+            <tr>
+              <th scope="col">Company</th>
+              <th scope="col" class="num">P/E</th>
+              <th scope="col" class="num">P/B</th>
+              <th scope="col" class="num">ROE %</th>
+              <th scope="col" class="num">Market Cap</th>
+              <th scope="col" class="num">Price</th>
+              <th scope="col" class="num">Today</th>
+              <th scope="col">Rating</th>
+            </tr>
+          </thead>
+          <tbody id="peers-body"></tbody>
+        </table>
+      </div>
+      <p class="peers-note muted">Source: indianapi.in · Peers from sector grouping</p>
+    </details>
+
+    <section class="section section--chart">
+      <h3 class="section-heading">Price chart</h3>
+      <div class="period-bar" role="group" aria-label="Chart period">
+        <button type="button" class="period-btn" data-period="1m">1M</button>
+        <button type="button" class="period-btn" data-period="6m">6M</button>
+        <button type="button" class="period-btn active" data-period="1yr">1Y</button>
+        <button type="button" class="period-btn" data-period="3yr">3Y</button>
+        <button type="button" class="period-btn" data-period="5yr">5Y</button>
+      </div>
+      <div class="chart-canvas-wrap">
+        <canvas id="price-chart" aria-label="Price history"></canvas>
+      </div>
+      <p id="chart-status" class="chart-status muted"></p>
+    </section>
+
+    <section class="section">
+      <h3 class="section-heading">Shareholding Pattern</h3>
+      <div class="sh-bar" role="img" aria-label="Shareholding breakdown">
+        <div class="sh-seg sh-promoter" id="sh-promoter-bar" style="width:0%"></div>
+        <div class="sh-seg sh-fii" id="sh-fii-bar" style="width:0%"></div>
+        <div class="sh-seg sh-dii" id="sh-dii-bar" style="width:0%"></div>
+        <div class="sh-seg sh-public" id="sh-public-bar" style="width:0%"></div>
+      </div>
+      <div class="sh-legend">
+        <span id="sh-promoter-lbl">Promoters —</span>
+        <span id="sh-fii-lbl">FII —</span>
+        <span id="sh-dii-lbl">MF/DII —</span>
+        <span id="sh-public-lbl">Other —</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <h3 class="section-heading">Analyst Consensus</h3>
+      <div class="analyst-bar" role="img" aria-label="Analyst ratings">
+        <div class="ab-seg ab-sb" id="ab-sb" style="width:0%"></div>
+        <div class="ab-seg ab-b" id="ab-b" style="width:0%"></div>
+        <div class="ab-seg ab-h" id="ab-h" style="width:0%"></div>
+        <div class="ab-seg ab-s" id="ab-s" style="width:0%"></div>
+        <div class="ab-seg ab-ss" id="ab-ss" style="width:0%"></div>
+      </div>
+      <p id="analyst-lbl" class="analyst-lines muted"></p>
+      <p id="recos-lbl" class="analyst-lines muted"></p>
+    </section>
+
+    <div id="flags-section" class="flags-section" hidden>
+      <details class="details-warn">
+        <summary>
+          Data quality warnings
+          <span class="badge-warn" id="flag-count">0</span>
+        </summary>
+        <ul id="flags-list" class="flags-list"></ul>
+      </details>
+    </div>
+
+    {% if ENABLE_ANNOUNCEMENTS %}
+    <div id="ann-section" class="ann-section" hidden>
+      <details class="details-default">
+        <summary>Exchange announcements</summary>
+        <div id="ann-list" class="ann-list"></div>
+      </details>
+    </div>
+    {% endif %}
+
+    <details class="details-default news-details" open>
+      <summary>Recent news</summary>
+      <div id="news-list" class="news-list"></div>
+    </details>
+
+    <section class="section section--brief">
+      <h3 class="section-heading">AI Research Brief</h3>
+      <div id="brief-box" class="brief-box">
+        <p class="muted">Enter a ticker above and press Analyse →</p>
+      </div>
+      <p class="disclaimer">⚠ Not investment advice. AI output may contain errors — verify from official sources.</p>
+    </section>
+
+    {% if ENABLE_PE_HISTORY %}
+    <details class="details-default pe-details">
+      <summary>PE Ratio History</summary>
+      <div class="pe-chart-wrap">
+        <canvas id="pe-chart" aria-label="PE ratio history"></canvas>
+      </div>
+      <p id="pe-chart-status" class="pe-chart-status muted"></p>
+    </details>
+    {% endif %}
+  </div>
+</div>
+
+{% if ENABLE_MARKET_DASHBOARD %}
+{% include 'market.html' %}
+{% endif %}
+{% endblock %}
