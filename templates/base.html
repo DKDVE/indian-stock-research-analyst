@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}Indian Stock Research Analyst{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="app-body"
+      data-enable-market="{{ ENABLE_MARKET_DASHBOARD | tojson }}"
+      data-enable-pe-history="{{ ENABLE_PE_HISTORY | tojson }}"
+      data-enable-announcements="{{ ENABLE_ANNOUNCEMENTS | tojson }}">
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="app-header__brand">
+        <h1 class="app-header__title">Indian Stock Research Analyst</h1>
+        <p class="app-header__subtitle">NSE/BSE research powered by AI</p>
+      </div>
+      <div class="app-header__status" title="API status">
+        <span id="health-dot" class="health-dot health-dot--unknown" aria-hidden="true"></span>
+        <span class="visually-hidden" id="health-label">Checking connection</span>
+      </div>
+    </header>
+
+    <nav class="tab-bar" role="tablist" aria-label="Main">
+      <button type="button" class="tab-btn active" id="tab-btn-stock" role="tab" aria-selected="true" data-tab="stock">Stock Research</button>
+      {% if ENABLE_MARKET_DASHBOARD %}
+      <button type="button" class="tab-btn" id="tab-btn-market" role="tab" aria-selected="false" data-tab="market">Market Pulse</button>
+      {% endif %}
+    </nav>
+
+    {% block content %}{% endblock %}
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script type="module" src="{{ url_for('static', filename='js/stock.js') }}"></script>
+</body>
+</html>
