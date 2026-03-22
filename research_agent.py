@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-PLACEHOLDER_RA
-=======
 """
 Indian Stock Market Research Analyst Agent
 ==========================================
@@ -1656,4 +1653,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
->>>>>>> 3313016 (Add Flask Indian stock research app for Render deployment)

@@ -3,13 +3,5 @@ __pycache__/
 *.pyc
 venv/
 outputs/
-<<<<<<< HEAD
-<<<<<<< HEAD
-*.log
-=======
-*.log
->>>>>>> 3313016 (Add Flask Indian stock research app for Render deployment)
-=======
 *.log
 .cursor
->>>>>>> 016cd35 (Update Flask app for improved performance and stability in production)

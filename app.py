@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-PLACEHOLDER_APP
-=======
 """
 Indian Stock Research Analyst — Web App
 ========================================
@@ -641,4 +638,3 @@ if __name__ == "__main__":
 ╚══════════════════════════════════════════════════════╝
 """)
     app.run(debug=False, host="0.0.0.0", port=port, threaded=True)
->>>>>>> 3313016 (Add Flask Indian stock research app for Render deployment)
