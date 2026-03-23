@@ -256,7 +256,8 @@ function populateCards(data) {
         annSection.hidden = false;
         $("ann-list").innerHTML = anns
           .map((a) => {
-            const subj = stripHtmlToText(a.subject || "(no subject)") || "(no subject)";
+            const subj =
+              stripHtmlToText(a.subject || a.description || "(no subject)") || "(no subject)";
             return `<div class="ann-item"><span>${escapeHtml(subj)}</span><span class="ann-item__date">${escapeHtml(a.date || "")}</span></div>`;
           })
           .join("");
