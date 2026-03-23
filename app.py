@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from research_agent import (
     fetch_stock_data,
     fetch_historical_data,
+    filter_price_history_by_period,
     fetch_pe_history,
     fetch_statements,
     fetch_announcements,
@@ -224,13 +225,13 @@ def api_data():
         if isinstance(pt, dict):
             price_target = pt.get("Mean") or pt.get("UnverifiedMean")
 
-    # announcements
+    # announcements (normalized in fetch_announcements: {date, subject, description})
     anns = supp.get("announcements") or []
     ann_list = [
         {
-            "date":    a.get("date", ""),
-            "subject": (a.get("subject") or a.get("headline") or
-                        a.get("description", ""))[:100],
+            "date":         (a.get("date") or "")[:80],
+            "subject":      (a.get("subject") or "")[:220],
+            "description":  (a.get("description") or "")[:400],
         }
         for a in (anns if isinstance(anns, list) else [])[:5]
         if isinstance(a, dict)
@@ -324,7 +325,8 @@ def api_history():
         if d and c:
             cleaned.append({"date": str(d).split("T")[0], "close": round(c, 2)})
 
-    return jsonify({"ticker": ticker, "period": period, "data": cleaned[-252:]})
+    cleaned = filter_price_history_by_period(cleaned, period)
+    return jsonify({"ticker": ticker, "period": period, "data": cleaned})
 
 
 @app.route("/api/brief")

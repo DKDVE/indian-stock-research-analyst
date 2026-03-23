@@ -12,11 +12,12 @@ Validation tickers: RELIANCE, HDFCBANK, ZOMATO, TATAMOTORS, INFY, ADANIPORTS, IR
 
 import sys
 import os
+import re
 import json
 import time
 import argparse
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import anthropic
 from dotenv import load_dotenv
@@ -252,6 +253,60 @@ def fetch_historical_data(stock_name: str, period: str = "1yr") -> Optional[list
     return None
 
 
+def filter_price_history_by_period(cleaned: list, period: str) -> list:
+    """
+    Keep rows in the trailing calendar window for the selected chart range.
+
+    The upstream API may return a long series for every period request; the app
+    previously sliced ``cleaned[-252:]``, which always capped the chart at ~1Y
+    and made 1M/6M/3Y/5Y look identical apart from minor length differences.
+    """
+    if not cleaned:
+        return cleaned
+    p = (period or "1yr").strip().lower()
+    calendar_days = {
+        "1m": 45,
+        "6m": 200,
+        "1yr": 400,
+        "3yr": 1200,
+        "5yr": 2000,
+        "10yr": 4000,
+        "max": 365 * 30,
+    }.get(p, 400)
+
+    try:
+        sorted_rows = sorted(
+            cleaned,
+            key=lambda r: (r.get("date") or "")[:10],
+        )
+        last_str = (sorted_rows[-1].get("date") or "")[:10]
+        last_dt = datetime.strptime(last_str, "%Y-%m-%d")
+        cutoff = last_dt - timedelta(days=calendar_days)
+        out = []
+        for r in sorted_rows:
+            ds = (r.get("date") or "")[:10]
+            try:
+                dt = datetime.strptime(ds, "%Y-%m-%d")
+                if dt >= cutoff:
+                    out.append(r)
+            except ValueError:
+                continue
+        if out:
+            return out
+    except (ValueError, IndexError, TypeError, OSError):
+        pass
+
+    sorted_rows = sorted(
+        cleaned,
+        key=lambda r: (r.get("date") or "")[:10],
+    )
+    limits = {"1m": 24, "6m": 128, "1yr": 252, "3yr": 756, "5yr": 1260, "10yr": 2520, "max": 5000}
+    n = limits.get(p, 252)
+    if len(sorted_rows) <= n:
+        return sorted_rows
+    return sorted_rows[-n:]
+
+
 def fetch_statements(stock_name: str) -> Optional[dict]:
     """
     GET /statement — quarterly P&L + balance sheet.
@@ -263,20 +318,121 @@ def fetch_statements(stock_name: str) -> Optional[dict]:
     })
 
 
+def _first_nonempty_str(*vals: object) -> str:
+    for v in vals:
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return ""
+
+
+def _looks_like_date_prefix(s: str) -> bool:
+    """Short leading segment before ' - ' in combined announcement blobs (e.g. '18 Mar')."""
+    s = s.strip()
+    if not s or len(s) > 28:
+        return False
+    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+        return True
+    if re.match(r"^\d{1,2}\s+[A-Za-z]{3}\b", s):
+        return True
+    if re.match(r"^\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}$", s):
+        return True
+    return False
+
+
+def normalize_announcement_item(raw: dict) -> dict:
+    """
+    Map a raw /recent_announcements row to {date, subject, description}.
+
+    IndianAPI responses often omit `subject` or put 'DD Mon - body...' entirely in `date`.
+    We merge alternate field names (Subject, title, body, etc.) so the UI never shows a
+    blank title when text exists in another key.
+    """
+    if not isinstance(raw, dict):
+        return {"date": "", "subject": "", "description": ""}
+
+    subject = _first_nonempty_str(
+        raw.get("subject"),
+        raw.get("Subject"),
+        raw.get("headline"),
+        raw.get("Headline"),
+        raw.get("title"),
+        raw.get("Title"),
+        raw.get("newsTitle"),
+        raw.get("announcementType"),
+        raw.get("category"),
+        raw.get("type"),
+    )
+    desc = _first_nonempty_str(
+        raw.get("description"),
+        raw.get("Description"),
+        raw.get("details"),
+        raw.get("Details"),
+        raw.get("text"),
+        raw.get("content"),
+        raw.get("message"),
+        raw.get("remarks"),
+        raw.get("body"),
+        raw.get("announcement"),
+        raw.get("announcementText"),
+        raw.get("summary"),
+    )
+    date_val = _first_nonempty_str(
+        raw.get("date"),
+        raw.get("Date"),
+        raw.get("announcementDate"),
+        raw.get("time"),
+        raw.get("filingDate"),
+        raw.get("newsdate"),
+    )
+
+    # Combined field: "18 Mar - Customs redemption fine..." with no separate subject/description
+    if date_val and " - " in date_val:
+        left, right = date_val.split(" - ", 1)
+        left, right = left.strip(), right.strip()
+        if _looks_like_date_prefix(left) and len(right) > 3:
+            date_val = left
+            if not subject:
+                subject = right
+            if not desc:
+                desc = right
+
+    if not subject and desc:
+        subject = desc
+    if not desc and subject:
+        desc = subject
+
+    # Single long blob only in date (no recognised split)
+    if not subject and date_val and not desc and len(date_val) > 50:
+        subject = date_val[:220]
+        date_val = ""
+
+    return {"date": date_val, "subject": subject, "description": desc}
+
+
 def fetch_announcements(stock_name: str) -> Optional[list]:
     """
     GET /recent_announcements — BSE/NSE exchange filings.
-    Returns list of {date, subject, description} dicts.
+    Returns list of {date, subject, description} dicts (normalized).
     """
     data = _indianapi_get("/recent_announcements", {"stock_name": stock_name})
     if data is None:
         return None
+    raw_list = None
     if isinstance(data, list):
-        return data
-    for key in ("announcements", "data", "results"):
-        if key in data and isinstance(data[key], list):
-            return data[key]
-    return None
+        raw_list = data
+    elif isinstance(data, dict):
+        for key in ("announcements", "data", "results", "recentAnnouncements"):
+            if key in data and isinstance(data[key], list):
+                raw_list = data[key]
+                break
+    if not raw_list:
+        return None
+    out = [normalize_announcement_item(x) for x in raw_list if isinstance(x, dict)]
+    out = [x for x in out if x.get("date") or x.get("subject") or x.get("description")]
+    return out or None
 
 
 def fetch_pe_history(stock_name: str, period: str = "3yr") -> Optional[list]:
@@ -376,14 +532,13 @@ def _mock_market_feed(feed_type: str) -> list:
 
 
 def _mock_historical(ticker: str) -> list:
-    """Generate 12 months of mock daily price data for chart testing."""
+    """Generate ~5y of mock daily price data so period buttons change the chart window."""
     import random
     random.seed(hash(ticker) % 1000)
     base = 1400.0
     rows = []
-    from datetime import datetime, timedelta
-    d = datetime.now() - timedelta(days=365)
-    for i in range(252):  # ~252 trading days/year
+    d = datetime.now() - timedelta(days=2200)
+    for i in range(1300):  # ~5y trading days; filtered per period in /api/history
         open_ = base * (1 + random.uniform(-0.012, 0.012))
         close = open_ * (1 + random.uniform(-0.015, 0.015))
         high  = max(open_, close) * (1 + random.uniform(0, 0.008))
