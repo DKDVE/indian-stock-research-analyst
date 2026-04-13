@@ -6,4 +6,6 @@ services:
     plan: free
     region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    # Default gunicorn timeout is 30s — OpenRouter SSE for /api/brief often runs longer; workers get SIGKILL → 500.
+    # gthread: one process can serve other API requests while a long stream runs on a thread (within RAM limits).
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 4 --timeout 300 --graceful-timeout 60

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ ticker }} — AI Research</title>
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <style>
+    body { margin: 0; padding: 12px; font-size: 13px; }
+    .signal-card { border: 0.5px solid var(--color-border,#e2e2e2); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .verdict { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .stance-bullish { color: #16a34a; }
+    .stance-bearish { color: #dc2626; }
+    .stance-caution { color: #d97706; }
+    .stance-neutral { color: var(--color-text-secondary,#666); }
+    .one-liner { font-size: 13px; color: var(--color-text-secondary,#666); margin-bottom: 10px; }
+    .row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .kv { flex: 1; min-width: 70px; }
+    .kv .label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--color-muted,#888); }
+    .kv .val { font-size: 14px; font-weight: 600; }
+    .risk-box { background: var(--color-background-danger,#fff5f5); border-radius: 6px; padding: 8px 10px; font-size: 12px; margin-bottom: 6px; }
+    .opp-box  { background: var(--color-background-success,#f0fdf4); border-radius: 6px; padding: 8px 10px; font-size: 12px; margin-bottom: 10px; }
+    .brief-box { font-size: 12px; line-height: 1.65; padding: 10px; border: 0.5px solid var(--color-border,#e2e2e2); border-radius: 6px; max-height: 300px; overflow-y: auto; }
+    .brief-box h3 { font-size: 12px; font-weight: 600; margin: 8px 0 3px; }
+    .brief-box p, .brief-box li { font-size: 12px; margin: 0 0 5px; }
+    .skeleton { height: 12px; border-radius: 3px; background: linear-gradient(90deg,var(--color-background-secondary,#f0f0f0) 25%,var(--color-border,#e0e0e0) 50%,var(--color-background-secondary,#f0f0f0) 75%); background-size: 400px 100%; animation: shimmer 1.5s infinite; margin-bottom: 6px; }
+    @keyframes shimmer { 0%{background-position:-400px 0} 100%{background-position:400px 0} }
+    #loading { color: var(--color-muted,#888); font-size: 12px; padding: 20px 0; text-align: center; }
+    #error-msg { color: #dc2626; font-size: 12px; padding: 10px 0; }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading analysis for {{ ticker }}…</div>
+  <div id="error-msg" style="display:none"></div>
+  <div id="panel" style="display:none">
+
+    <div class="signal-card">
+      <div class="verdict" id="verdict"></div>
+      <div class="one-liner" id="one-liner"></div>
+      <div class="row">
+        <div class="kv"><div class="label">Price</div><div class="val" id="p-price">—</div></div>
+        <div class="kv"><div class="label">Change</div><div class="val" id="p-change">—</div></div>
+        <div class="kv"><div class="label">P/E</div><div class="val" id="p-pe">—</div></div>
+        <div class="kv"><div class="label">vs MAs</div><div class="val" id="p-ma" style="font-size:11px">—</div></div>
+      </div>
+      <div class="risk-box" id="risk-box" style="display:none">
+        <strong>Risk:</strong> <span id="key-risk"></span>
+      </div>
+      <div class="opp-box" id="opp-box" style="display:none">
+        <strong>Opportunity:</strong> <span id="key-opp"></span>
+      </div>
+    </div>
+
+    <details>
+      <summary style="font-size:12px;font-weight:600;cursor:pointer;margin-bottom:8px">
+        Full AI brief
+      </summary>
+      <div id="brief-box" class="brief-box">
+        <div class="skeleton" style="width:60%"></div>
+        <div class="skeleton" style="width:100%"></div>
+        <div class="skeleton" style="width:80%"></div>
+      </div>
+    </details>
+
+    <p style="font-size:10px;color:var(--color-muted,#888);margin-top:8px">
+      Not investment advice. Data: indianapi.in. AI may contain errors.
+    </p>
+  </div>
+
+  <script>
+    const TICKER = {{ ticker | tojson }};
+
+    async function loadPanel() {
+      try {
+        const dataResp = await fetch(`/api/data?ticker=${encodeURIComponent(TICKER)}`);
+        const data = await dataResp.json();
+        if (data.error) throw new Error(data.error);
+
+        const sigResp = await fetch(`/api/signal?ticker=${encodeURIComponent(TICKER)}`);
+        const sig = await sigResp.json();
+        if (sig.error) throw new Error(sig.error);
+
+        const verdictEl = document.getElementById('verdict');
+        verdictEl.textContent = sig.verdict || 'N/A';
+        verdictEl.className = 'verdict stance-' + (sig.stance || 'neutral');
+        document.getElementById('one-liner').textContent = sig.one_liner || '';
+        document.getElementById('p-pe').textContent = sig.pe_context || 'N/A';
+        document.getElementById('p-ma').textContent = sig.price_vs_ma || 'N/A';
+
+        if (data.price_nse) {
+          const pr = parseFloat(String(data.price_nse).replace(/,/g, ''));
+          if (!Number.isNaN(pr)) {
+            document.getElementById('p-price').textContent = '₹' + pr.toLocaleString('en-IN', {maximumFractionDigits:2});
+          }
+        }
+        if (data.percent_change != null && data.percent_change !== '') {
+          const ch = parseFloat(String(data.percent_change).replace(/,/g, ''));
+          if (!Number.isNaN(ch)) {
+            const chEl = document.getElementById('p-change');
+            chEl.textContent = (ch >= 0 ? '+' : '') + ch.toFixed(2) + '%';
+            chEl.style.color = ch >= 0 ? '#16a34a' : '#dc2626';
+          }
+        }
+
+        if (sig.key_risk && sig.key_risk !== 'N/A') {
+          document.getElementById('key-risk').textContent = sig.key_risk;
+          document.getElementById('risk-box').style.display = 'block';
+        }
+        if (sig.key_opportunity && sig.key_opportunity !== 'N/A') {
+          document.getElementById('key-opp').textContent = sig.key_opportunity;
+          document.getElementById('opp-box').style.display = 'block';
+        }
+
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('panel').style.display = 'block';
+
+        streamBrief();
+      } catch (e) {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('error-msg').style.display = 'block';
+        document.getElementById('error-msg').textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      }
+    }
+
+    async function streamBrief() {
+      const box = document.getElementById('brief-box');
+      box.innerHTML = '';
+      const url = `/api/brief?ticker=${encodeURIComponent(TICKER)}&prompt=A_structured`;
+      let resp;
+      try { resp = await fetch(url); } catch(e) { return; }
+      if (!resp.ok) return;
+
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let text = '', buf = '';
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, {stream: true});
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') {
+            box.innerHTML = typeof marked !== 'undefined'
+              ? marked.parse(text, {breaks:true, gfm:true})
+              : text.replace(/\n/g,'<br>');
+            return;
+          }
+          text += payload.replace(/⏎/g, '\n');
+          box.innerHTML = typeof marked !== 'undefined'
+            ? marked.parse(text, {breaks:true, gfm:true})
+            : text.replace(/\n/g,'<br>');
+        }
+      }
+    }
+
+    loadPanel();
+  </script>
+</body>
+</html>

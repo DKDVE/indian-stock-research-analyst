@@ -2,7 +2,7 @@
 Indian Stock Research Analyst — Web App
 ========================================
 Run:  python app.py
-Open: http://localhost:5000
+Open: http://localhost:5001 (default; override with PORT)
 
 The non-tech user only needs to open the browser link.
 You (the technical person) run this once on your machine / server.
@@ -17,6 +17,11 @@ from flask import Flask, request, jsonify, Response, stream_with_context, render
 from datetime import datetime
 
 load_dotenv()
+
+# OpenRouter HTTP-Referer + docs (match this app’s public URL / PORT)
+_RESEARCH_APP_ORIGIN = os.environ.get("RESEARCH_APP_ORIGIN") or (
+    f"http://localhost:{os.environ.get('PORT', '5001')}"
+)
 
 # ── pull in all logic from the research_agent script ──────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -47,6 +52,7 @@ from research_agent import (
     _safe_int,
     _financials_get,
     _peers_extract,
+    _km_get,
     is_indianapi_configured,
 )
 
@@ -65,6 +71,92 @@ def inject_flags():
 # ── in-memory cache (one slot — good enough for validation) ───────────────────
 _cache = {}
 _cache_lock = threading.Lock()
+
+
+def _strip_json_fence(text: str) -> str:
+    """Remove ```json fences from LLM output."""
+    clean = (text or "").strip()
+    if not clean.startswith("```"):
+        return clean
+    parts = clean.split("```")
+    if len(parts) >= 2:
+        block = parts[1]
+        if block.lstrip().startswith("json"):
+            block = block.lstrip()[4:]
+        return block.strip()
+    return clean
+
+
+def _invoke_llm_sync(prompt_text: str, ticker: str, max_tokens: int = 800) -> tuple:
+    """
+    Non-streaming LLM for JSON signal/digest endpoints.
+    Uses OpenRouter when LLM_PROVIDER=openrouter; otherwise research_agent.run_llm (Anthropic).
+    """
+    if (
+        LLM_PROVIDER == "openrouter"
+        and OPENROUTER_KEY
+        and OPENROUTER_KEY != "YOUR_OPENROUTER_KEY_HERE"
+    ):
+        import requests as _req
+        import json as _json
+
+        try:
+            resp = _req.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": _RESEARCH_APP_ORIGIN,
+                    "X-Title": "Indian Stock Research Analyst",
+                },
+                json={
+                    "model": LLM_MODEL,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt_text},
+                    ],
+                    "max_tokens": max_tokens,
+                },
+                timeout=120,
+            )
+            if resp.status_code != 200:
+                return None, resp.text[:400]
+            data = resp.json()
+            text = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            return text, None
+        except Exception as e:
+            return None, str(e)
+    return run_llm(prompt_text, ticker)
+
+
+@app.after_request
+def add_cors_for_panel(response):
+    """CORS for OpenAlgo; relax framing for embeddable /panel/* routes."""
+    allowed = [
+        o.strip()
+        for o in os.environ.get(
+            "PANEL_ALLOWED_ORIGINS",
+            "http://localhost:5000,http://127.0.0.1:5000",
+        ).split(",")
+        if o.strip()
+    ]
+    oh = os.environ.get("OPENALGO_HOST", "").strip().rstrip("/")
+    if oh and oh not in allowed:
+        allowed.append(oh)
+
+    origin = request.headers.get("Origin", "")
+    if origin and origin in allowed:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+
+    if request.path.startswith("/panel/"):
+        response.headers.pop("X-Frame-Options", None)
+        fa = ["'self'"] + [a for a in allowed if a]
+        response.headers["Content-Security-Policy"] = "frame-ancestors " + " ".join(fa)
+
+    return response
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -130,6 +222,7 @@ def api_data():
     sections = build_structured_summary(raw, ticker)
     with _cache_lock:
         _cache[ticker] = format_full_summary(sections)
+        _cache[f"_raw_{ticker}"] = raw
 
     # ── step 4: build JSON payload for the frontend cards ────────────────────
     from research_agent import (_km_get, _sh_get, _av_get, _news_title, _news_date,
@@ -383,7 +476,7 @@ def api_brief():
                 headers={
                     "Authorization": f"Bearer {OPENROUTER_KEY}",
                     "Content-Type":  "application/json",
-                    "HTTP-Referer":  "http://localhost:5000",
+                    "HTTP-Referer":  _RESEARCH_APP_ORIGIN,
                     "X-Title":       "Indian Stock Research Analyst",
                 },
                 json={
@@ -547,12 +640,263 @@ def api_market():
     return jsonify({"feed": feed, "data": normalised})
 
 
+@app.route("/api/signal")
+def api_signal():
+    """
+    Structured plain-English signal for a ticker (short verdict for order context).
+    """
+    ticker = request.args.get("ticker", "").upper().strip()
+    if not ticker:
+        return jsonify({"error": "ticker required"}), 400
+
+    used_cache = False
+    with _cache_lock:
+        cached_summary = _cache.get(ticker)
+
+    if not cached_summary:
+        raw, err = fetch_stock_data(ticker)
+        if err:
+            return jsonify({"error": err}), 502
+        sections = build_structured_summary(raw, ticker)
+        summary = format_full_summary(sections)
+        with _cache_lock:
+            _cache[ticker] = summary
+            _cache[f"_raw_{ticker}"] = raw
+        cached_summary = summary
+    else:
+        used_cache = True
+
+    with _cache_lock:
+        raw_data = _cache.get(f"_raw_{ticker}")
+    if not raw_data:
+        raw2, err2 = fetch_stock_data(ticker)
+        if not err2:
+            raw_data = raw2
+            with _cache_lock:
+                _cache[f"_raw_{ticker}"] = raw_data
+
+    signal_prompt = f"""You are a senior equity analyst at an Indian fund.
+A trader is about to make a decision on {ticker}. Give them a 10-second brief.
+
+Data:
+{cached_summary}
+
+Respond ONLY with a valid JSON object, no markdown, no explanation, no preamble:
+{{
+  "verdict": "<3-6 word verdict, e.g. 'Watchlist — wait for clarity'>",
+  "stance": "<exactly one of: bullish, bearish, neutral, caution>",
+  "confidence": "<exactly one of: high, medium, low>",
+  "one_liner": "<one sentence, factual, no fluff, max 15 words>",
+  "key_risk": "<one sentence, most important risk right now>",
+  "key_opportunity": "<one sentence, most important upside catalyst>"
+}}
+
+Rules:
+- stance=bullish only if PE is reasonable AND price is above MAs AND analyst consensus is positive
+- stance=bearish if price is significantly below MAs AND negative news
+- confidence=high only if all key metrics are available and consistent
+- Never recommend buying or selling. Only describe the setup.
+- Write for someone who knows what PE and moving averages mean.
+- Use plain English, no jargon like "headwinds" or "tailwinds".
+"""
+
+    raw_response, llm_err = _invoke_llm_sync(signal_prompt, ticker, max_tokens=400)
+    if llm_err or not raw_response:
+        signal_data = {
+            "verdict": "Analysis incomplete",
+            "stance": "neutral",
+            "confidence": "low",
+            "one_liner": "Could not generate signal. Try running full analysis first.",
+            "key_risk": "N/A",
+            "key_opportunity": "N/A",
+        }
+    else:
+        try:
+            clean = _strip_json_fence(raw_response)
+            signal_data = json.loads(clean.strip())
+        except (json.JSONDecodeError, TypeError, ValueError):
+            signal_data = {
+                "verdict": "Analysis incomplete",
+                "stance": "neutral",
+                "confidence": "low",
+                "one_liner": "Could not parse signal output.",
+                "key_risk": "N/A",
+                "key_opportunity": "N/A",
+            }
+
+    signal_data["ticker"] = ticker
+    signal_data["data_date"] = datetime.now().strftime("%d %b %Y")
+    signal_data["cached"] = used_cache
+
+    if raw_data and isinstance(raw_data, dict):
+        km = raw_data.get("keyMetrics") or {}
+        sdr = raw_data.get("stockDetailsReusableData") or {}
+        pe = _km_get(
+            km,
+            "pPerEBasicExcludingExtraordinaryItemsTTM",
+            "pPerEExcludingExtraordinaryItemsMostRecentFiscalYear",
+        ) or str(sdr.get("pPerEBasicExcludingExtraordinaryItemsTTM") or "")
+        pe_s = str(pe).strip() if pe not in (None, "") else ""
+        signal_data["pe_context"] = f"{pe_s}x" if pe_s else "N/A"
+
+        tech = raw_data.get("stockTechnicalData") or []
+        ma_map = {}
+        if isinstance(tech, list):
+            for e in tech:
+                if isinstance(e, dict) and "days" in e:
+                    try:
+                        ma_map[int(e["days"])] = e.get("nsePrice") or e.get("bsePrice")
+                    except (TypeError, ValueError):
+                        pass
+        cp = raw_data.get("currentPrice", {})
+        try:
+            if isinstance(cp, dict):
+                price = float(
+                    str(cp.get("NSE") or cp.get("BSE") or 0).replace(",", "")
+                )
+            else:
+                price = float(str(cp or 0).replace(",", ""))
+        except (ValueError, TypeError):
+            price = 0.0
+        try:
+            sma50 = float(str(ma_map.get(50) or 0).replace(",", ""))
+            sma300 = float(str(ma_map.get(300) or 0).replace(",", ""))
+        except (ValueError, TypeError):
+            sma50 = sma300 = 0.0
+        if price and sma50 and sma300:
+            above50 = price > sma50
+            above300 = price > sma300
+            signal_data["price_vs_ma"] = (
+                "Above 50d and 300d MA"
+                if above50 and above300
+                else (
+                    "Below 50d and 300d MA"
+                    if not above50 and not above300
+                    else (
+                        "Mixed — above 50d, below 300d"
+                        if above50
+                        else "Mixed — below 50d, above 300d"
+                    )
+                )
+            )
+        else:
+            signal_data["price_vs_ma"] = "N/A"
+    else:
+        signal_data.setdefault("pe_context", "N/A")
+        signal_data.setdefault("price_vs_ma", "N/A")
+
+    return jsonify(signal_data)
+
+
+@app.route("/api/digest", methods=["GET", "POST", "OPTIONS"])
+def api_digest():
+    """Morning watchlist digest — ranked briefs per ticker."""
+    if request.method == "OPTIONS":
+        return "", 204
+
+    if request.method == "POST":
+        data = request.get_json() or {}
+        tickers = data.get("tickers", [])
+    else:
+        raw_param = request.args.get("tickers", "")
+        tickers = [t.strip().upper() for t in raw_param.split(",") if t.strip()]
+
+    if not tickers:
+        return jsonify({"error": "tickers required (comma-separated or JSON array)"}), 400
+
+    tickers = tickers[:15]
+
+    import concurrent.futures as _cf
+
+    def _analyse_one(ticker):
+        try:
+            raw, err = fetch_stock_data(ticker)
+            if err:
+                return None
+            with _cache_lock:
+                _cache[f"_raw_{ticker}"] = raw
+            sections = build_structured_summary(raw, ticker)
+            summary = format_full_summary(sections)
+            with _cache_lock:
+                _cache[ticker] = summary
+
+            cp = raw.get("currentPrice", {})
+            price = cp.get("NSE") or cp.get("BSE") if isinstance(cp, dict) else cp
+            change = raw.get("percentChange", "0")
+
+            signal_prompt = f"""Ticker: {ticker}
+Data summary:
+{summary[:1200]}
+
+Reply ONLY with JSON (no markdown):
+{{"verdict":"<3-6 words>","stance":"<bullish|bearish|neutral|caution>","one_liner":"<max 12 words>","why_today":"<one sentence on what makes this interesting TODAY>"}}"""
+
+            raw_resp, llm_err = _invoke_llm_sync(signal_prompt, ticker, max_tokens=200)
+            if llm_err or not raw_resp:
+                return None
+            clean = _strip_json_fence(raw_resp).strip()
+            sig = json.loads(clean)
+
+            return {
+                "ticker": ticker,
+                "company": raw.get("companyName", ticker),
+                "price": str(price or "N/A"),
+                "change": str(change or "0"),
+                "verdict": sig.get("verdict", "N/A"),
+                "stance": sig.get("stance", "neutral"),
+                "one_liner": sig.get("one_liner", ""),
+                "why_today": sig.get("why_today", ""),
+            }
+        except Exception:
+            return None
+
+    results = []
+    failed = []
+    with _cf.ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {ex.submit(_analyse_one, t): t for t in tickers}
+        for fut in _cf.as_completed(futures):
+            t = futures[fut]
+            result = fut.result()
+            if result:
+                results.append(result)
+            else:
+                failed.append(t)
+
+    stance_order = {"bullish": 0, "neutral": 1, "caution": 2, "bearish": 3}
+    results.sort(key=lambda x: stance_order.get(x.get("stance", "neutral"), 1))
+
+    for i, r in enumerate(results):
+        r["rank"] = i + 1
+
+    return jsonify({
+        "date": datetime.now().strftime("%d %b %Y %H:%M"),
+        "total": len(results),
+        "digest": results,
+        "failed": failed,
+    })
+
+
+@app.route("/panel/<ticker>")
+def panel(ticker):
+    """Embeddable research panel for a single ticker (iframe-friendly)."""
+    ticker = ticker.upper().strip()
+    return render_template("panel.html", ticker=ticker)
+
+
+@app.route("/digest")
+def digest_page():
+    """Morning watchlist digest page."""
+    default_tickers = "RELIANCE,HDFCBANK,INFY,TATAMOTORS,ZOMATO,IRCTC,DMART,ADANIPORTS"
+    watchlist = request.args.get("tickers", default_tickers)
+    return render_template("digest.html", default_watchlist=watchlist)
+
+
 @app.route("/api/debug_fields")
 def debug_fields():
     """
     Shows EXACT field names and sample values from the live indianapi.in response.
     Use this to diagnose N/A issues.
-    Visit: http://localhost:5000/api/debug_fields?ticker=RELIANCE
+    Visit: http://localhost:5001/api/debug_fields?ticker=RELIANCE
     """
     ticker = request.args.get("ticker", "RELIANCE").upper().strip()
     raw, err = fetch_stock_data(ticker)
@@ -625,7 +969,7 @@ def debug_raw():
 
 # ── entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5001))
     print(f"""
 ╔══════════════════════════════════════════════════════╗
 ║     Indian Stock Research Analyst — Web App          ║
