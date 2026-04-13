@@ -1,4 +1,7 @@
-# Blueprint for Render — connect this Git repo in the Render dashboard or via MCP create_web_service.
+# Blueprint for Render — deploy with Dashboard → New → Blueprint and select this repo, OR paste
+# `startCommand` below into Web Service → Settings → Start Command. A plain “Web Service” from Git
+# does not read this file unless it was created from a Blueprint; env GUNICORN_CMD_ARGS in .env.example
+# fixes timeouts without changing the Start Command.
 services:
   - type: web
     name: indian-stock-research-analyst
