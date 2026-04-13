@@ -1,7 +1,7 @@
 # Blueprint for Render — deploy with Dashboard → New → Blueprint and select this repo, OR paste
 # `startCommand` below into Web Service → Settings → Start Command. A plain “Web Service” from Git
-# does not read this file unless it was created from a Blueprint; env GUNICORN_CMD_ARGS in .env.example
-# fixes timeouts without changing the Start Command.
+# does not read this file unless it was created from a Blueprint. Prefer gunicorn.conf.py so timeout
+# is versioned; GUNICORN_CMD_ARGS in .env.example is a fallback if you cannot change Start Command.
 services:
   - type: web
     name: indian-stock-research-analyst
@@ -9,6 +9,5 @@ services:
     plan: free
     region: singapore
     buildCommand: pip install -r requirements.txt
-    # Default gunicorn timeout is 30s — OpenRouter SSE for /api/brief often runs longer; workers get SIGKILL → 500.
-    # gthread: one process can serve other API requests while a long stream runs on a thread (within RAM limits).
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 4 --timeout 300 --graceful-timeout 60
+    # See gunicorn.conf.py — timeout/thread settings must not be only in env (easy to miss on Render).
+    startCommand: gunicorn -c gunicorn.conf.py app:app
