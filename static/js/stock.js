@@ -524,6 +524,15 @@ function init() {
   window.analyse = analyse;
   window.quickPick = quickPick;
   window.switchTab = switchTab;
+
+  const params = new URLSearchParams(window.location.search);
+  const qt = params.get("ticker");
+  if (qt) {
+    const t = qt.trim().toUpperCase();
+    const inp = $("ticker-input");
+    if (inp) inp.value = t;
+    analyse();
+  }
 }
 
 if (document.readyState === "loading") {

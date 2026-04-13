@@ -35,7 +35,7 @@ export ANTHROPIC_KEY="your_key_from_console.anthropic.com"
 python app.py
 ```
 
-Then open **http://localhost:5000** in any browser.
+Then open **http://localhost:5001** in any browser (or set `PORT` in `.env`).
 
 ---
 
@@ -50,13 +50,13 @@ ifconfig | grep "inet "
 ipconfig | findstr IPv4
 
 # Then tell the user to open:
-http://192.168.x.x:5000
+http://192.168.x.x:5001
 ```
 
 **Over the internet (temporary demo):**
 ```bash
 pip install cloudflared      # or download from cloudflare.com/products/tunnel
-cloudflared tunnel --url http://localhost:5000
+cloudflared tunnel --url http://localhost:5001
 # Cloudflare prints a public URL like: https://xxxx.trycloudflare.com
 # Share that URL — valid until you stop the tunnel
 ```
@@ -83,7 +83,7 @@ Or use environment variables — they take priority.
 ## Health check
 
 ```
-http://localhost:5000/health
+http://localhost:5001/health
 ```
 
 Returns JSON showing whether both API keys are configured.

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Morning digest · Indian Stock Research Analyst{% endblock %}
+
+{% block head_extra %}
+<style>
+  .digest-page { max-width: 1100px; margin: 0 auto; padding: 0 0 2rem; }
+  .digest-head { margin-bottom: 1.25rem; }
+  .digest-head h2 { margin: 0 0 0.35rem; font-size: 1.35rem; }
+  .digest-sub { margin: 0; font-size: 0.9rem; color: var(--color-text-secondary, #525252); }
+  .digest-controls { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem; }
+  .digest-controls input { flex: 1; min-width: 220px; }
+  .digest-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+  .digest-card {
+    border: 1px solid var(--color-border, #e5e5e5);
+    border-radius: 10px;
+    padding: 1rem;
+    background: var(--color-background, #fff);
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: box-shadow 0.15s ease;
+  }
+  .digest-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.08); }
+  .digest-card--muted { opacity: 0.75; cursor: default; }
+  .digest-card__ticker { font-weight: 700; font-size: 1rem; }
+  .digest-card__co { font-size: 0.82rem; color: var(--color-text-secondary, #525252); margin-bottom: 0.5rem; }
+  .digest-card__verdict { font-weight: 600; margin: 0.35rem 0; font-size: 0.95rem; }
+  .digest-card__why { font-size: 0.82rem; line-height: 1.45; color: var(--color-text-secondary, #404040); margin: 0.35rem 0 0.5rem; }
+  .digest-card__px { font-size: 0.85rem; margin-top: 0.5rem; }
+  .digest-card__link { font-size: 0.78rem; margin-top: 0.65rem; display: inline-block; color: var(--color-primary, #2563eb); }
+  .stance-bullish { color: #16a34a; }
+  .stance-bearish { color: #dc2626; }
+  .stance-caution { color: #d97706; }
+  .stance-neutral { color: #737373; }
+  .digest-skeleton-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .digest-sk { height: 120px; border-radius: 10px; background: linear-gradient(90deg,#f4f4f5 25%,#e8e8ea 50%,#f4f4f5 75%); background-size: 400px 100%; animation: digest-shimmer 1.4s infinite; }
+  @keyframes digest-shimmer { 0%{background-position:-400px 0} 100%{background-position:400px 0} }
+  .digest-meta { font-size: 0.8rem; color: var(--color-muted, #737373); margin-top: 1rem; }
+  .digest-failed { font-size: 0.85rem; color: #737373; margin-top: 0.75rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tab-panel active digest-page" role="main">
+  <div class="digest-head">
+    <h2>Morning digest</h2>
+    <p class="digest-sub" id="digest-subline">Watchlist analysis</p>
+  </div>
+
+  <div class="digest-controls">
+    <input type="text" id="watchlist-input" class="oat-input"
+           value="{{ default_watchlist }}"
+           placeholder="Comma-separated tickers"
+           aria-label="Watchlist tickers" />
+    <button type="button" id="refresh-digest" class="oat-btn oat-btn--primary">Refresh digest</button>
+  </div>
+
+  <div id="digest-error" class="status-bar status-bar--err" hidden role="alert"></div>
+
+  <div id="digest-skeleton" class="digest-skeleton-grid" hidden>
+    <div class="digest-sk"></div>
+    <div class="digest-sk"></div>
+    <div class="digest-sk"></div>
+  </div>
+
+  <div id="digest-grid" class="digest-grid"></div>
+  <p class="digest-failed" id="digest-failed" hidden></p>
+  <p class="digest-meta" id="digest-updated"></p>
+</div>
+
+<script type="module" src="{{ url_for('static', filename='js/digest.js') }}"></script>
+{% endblock %}
